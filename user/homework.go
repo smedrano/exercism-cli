@@ -30,6 +30,7 @@ const (
 type Homework struct {
 	Items    []*Item
 	template string
+	Errors   []FilesExistError
 }
 
 // NewHomework decorates a problem set with some additional data based on the
@@ -50,11 +51,23 @@ func NewHomework(problems []*api.Problem, c *config.Config) *Homework {
 
 // Save saves all problems in the problem set.
 func (hw *Homework) Save() error {
+	var itemErrs []FilesExistError
 	for _, item := range hw.Items {
-		if err := item.Save(); err != nil {
+		err := item.Save()
+		if err == nil {
+			continue
+		}
+
+		itErr, ok := err.(FilesExistError)
+		if !ok {
 			return err
 		}
+
+		itemErrs = append(itemErrs, itErr)
 	}
+
+	hw.Errors = itemErrs
+
 	return nil
 }
 

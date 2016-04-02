@@ -39,6 +39,15 @@ func (it *Item) Matches(filter HWFilter) bool {
 	return true
 }
 
+type FilesExistError struct {
+	Item      *Item
+	FilePaths []string
+}
+
+func (e FilesExistError) Error() string {
+	return fmt.Sprintf("%s: unable to write %d files", e.Item, len(e.FilePaths))
+}
+
 // Save writes the embedded problem to the filesystem.
 func (it *Item) Save() error {
 	if _, err := os.Stat(it.Path()); err != nil {
@@ -48,6 +57,7 @@ func (it *Item) Save() error {
 		it.isNew = true
 	}
 
+	var existingFiles []string
 	for name, text := range it.Files {
 		file := filepath.Join(it.Path(), name)
 
@@ -55,7 +65,13 @@ func (it *Item) Save() error {
 			return err
 		}
 
-		if _, err := os.Stat(file); err != nil {
+		_, err := os.Stat(file)
+		if err == nil {
+			existingFiles = append(existingFiles, file)
+			continue
+		}
+
+		if err != nil {
 			if !os.IsNotExist(err) {
 				return err
 			}
@@ -73,6 +89,14 @@ func (it *Item) Save() error {
 			}
 		}
 	}
+
+	if len(existingFiles) > 0 {
+		return FilesExistError{
+			Item:      it,
+			FilePaths: existingFiles,
+		}
+	}
+
 	return nil
 }
 

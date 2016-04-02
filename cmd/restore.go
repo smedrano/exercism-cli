@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"fmt"
 	"log"
 
 	"github.com/codegangsta/cli"
@@ -27,5 +28,18 @@ func Restore(ctx *cli.Context) {
 	if err := hw.Save(); err != nil {
 		log.Fatal(err)
 	}
+
 	hw.Summarize(user.HWNotSubmitted)
+
+	if len(hw.Errors) != 0 {
+		fmt.Println("There was errors saving files:")
+		for _, err := range hw.Errors {
+			fmt.Printf("- %s:\n", err)
+			for _, filePath := range err.FilePaths {
+				fmt.Printf("\t * %s\n", filePath)
+			}
+		}
+
+		fmt.Printf("\nIf you wish to override these files re-run the restore command using the --force flag\n")
+	}
 }
