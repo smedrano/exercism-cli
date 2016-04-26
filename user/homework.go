@@ -176,5 +176,13 @@ func (hw *Homework) Summarize(summaryFilter SummaryOption) {
 	fresh := len(hw.ItemsMatching(HWNew))
 	updated := len(hw.ItemsMatching(HWUpdated))
 	unchanged := len(hw.Items) - updated - fresh
-	fmt.Printf("\nunchanged: %d, updated: %d, new: %d\n\n", unchanged, updated, fresh)
+	var conflicted int
+	for _, err := range hw.Errors {
+		conflicted += len(err.FilePaths)
+	}
+
+	fmt.Printf(
+		"\nunchanged: %d, conflicts: %d, updated: %d, new: %d\n\n",
+		unchanged, conflicted, updated, fresh,
+	)
 }

@@ -32,11 +32,13 @@ func Restore(ctx *cli.Context) {
 	hw.Summarize(user.HWNotSubmitted)
 
 	if len(hw.Errors) != 0 {
-		fmt.Println("There was errors saving files:")
-		for _, err := range hw.Errors {
-			fmt.Printf("- %s:\n", err)
-			for _, filePath := range err.FilePaths {
-				fmt.Printf("\t * %s\n", filePath)
+		if ctx.GlobalBool("verbose") {
+			fmt.Println("There was errors saving files:")
+			for _, err := range hw.Errors {
+				fmt.Printf("- %s:\n", err)
+				for _, filePath := range err.FilePaths {
+					fmt.Printf("\t * %s\n", filePath)
+				}
 			}
 		}
 
