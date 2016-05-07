@@ -13,7 +13,7 @@ import (
 )
 
 // Submit posts an iteration to the API.
-func Submit(ctx *cli.Context) {
+func Submit(ctx *cli.Context) error {
 	if len(ctx.Args()) == 0 {
 		log.Fatal("Please enter a file name")
 	}
@@ -100,4 +100,6 @@ func Submit(ctx *cli.Context) {
 	}
 
 	fmt.Printf("%s - %s\n%s\n\n", submission.Language, submission.Name, submission.URL)
+
+	return nil
 }
