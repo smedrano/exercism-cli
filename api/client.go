@@ -1,92 +1,110 @@
 package api
 
 import (
-	"bytes"
-	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
-	"strings"
+	"time"
 
-	"github.com/exercism/cli/config"
 	"github.com/exercism/cli/debug"
-)
-
-const (
-	urlTrackerAPI  = "https://github.com/exercism/exercism.io/issues"
-	urlTrackerXAPI = "https://github.com/exercism/x-api/issues"
 )
 
 var (
 	// UserAgent lets the API know where the call is being made from.
-	// It's set from main() so that we have access to the version.
-	UserAgent string
+	// It's overridden from the root command so that we can set the version.
+	UserAgent = "github.com/exercism/cli"
+
+	// TimeoutInSeconds is the timeout the default HTTP client will use.
+	TimeoutInSeconds = 60
+	// HTTPClient is the client used to make HTTP calls in the cli package.
+	HTTPClient = &http.Client{Timeout: time.Duration(TimeoutInSeconds) * time.Second}
 )
 
-// Client contains the necessary information to contact the Exercism APIs.
+// Client is an http client that is configured for Exercism.
 type Client struct {
-	client   *http.Client
-	APIHost  string
-	XAPIHost string
-	APIKey   string
+	*http.Client
+	ContentType string
+	Token       string
+	APIBaseURL  string
 }
 
-// NewClient returns an Exercism API Client.
-func NewClient(c *config.Config) *Client {
+// NewClient returns an Exercism API client.
+func NewClient(token, baseURL string) (*Client, error) {
 	return &Client{
-		client:   http.DefaultClient,
-		APIHost:  c.API,
-		XAPIHost: c.XAPI,
-		APIKey:   c.APIKey,
-	}
+		Client:     HTTPClient,
+		Token:      token,
+		APIBaseURL: baseURL,
+	}, nil
 }
 
 // NewRequest returns an http.Request with information for the Exercism API.
 func (c *Client) NewRequest(method, url string, body io.Reader) (*http.Request, error) {
+	if c.Client == nil {
+		c.Client = HTTPClient
+	}
+
 	req, err := http.NewRequest(method, url, body)
 	if err != nil {
 		return nil, err
 	}
 
 	req.Header.Set("User-Agent", UserAgent)
-	req.Header.Set("Content-Type", "application/json")
+	if c.ContentType == "" {
+		req.Header.Set("Content-Type", "application/json")
+	} else {
+		req.Header.Set("Content-Type", c.ContentType)
+	}
+	if c.Token != "" {
+		req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", c.Token))
+	}
 
 	return req, nil
 }
 
 // Do performs an http.Request and optionally parses the response body into the given interface.
-func (c *Client) Do(req *http.Request, v interface{}) (*http.Response, error) {
-	debug.Println("Request", req.Method, req.URL)
+func (c *Client) Do(req *http.Request) (*http.Response, error) {
+	debug.DumpRequest(req)
 
-	res, err := c.client.Do(req)
+	res, err := c.Client.Do(req)
 	if err != nil {
 		return nil, err
 	}
-	debug.Printf("Response StatusCode=%d\n", res.StatusCode)
 
-	switch res.StatusCode {
-	case http.StatusNoContent:
-		return res, nil
-	case http.StatusInternalServerError:
-		url := urlTrackerAPI
-		if strings.Contains(req.URL.Host, "x.exercism.io") {
-			url = urlTrackerXAPI
-		}
-		return nil, fmt.Errorf("an internal server error was received.\nPlease file a bug report with the contents of 'exercism debug' at: %s ", url)
-	default:
-		if v != nil {
-			defer res.Body.Close()
-
-			var bodyCopy bytes.Buffer
-			body := io.TeeReader(res.Body, &bodyCopy)
-
-			err := json.NewDecoder(body).Decode(v)
-			debug.Printf("Response Body\n%s\n\n", bodyCopy.String())
-			if err != nil {
-				return nil, fmt.Errorf("error parsing API response - %s", err)
-			}
-		}
-	}
-
+	debug.DumpResponse(res)
 	return res, nil
+}
+
+// TokenIsValid calls the API to determine whether the token is valid.
+func (c *Client) TokenIsValid() (bool, error) {
+	url := fmt.Sprintf("%s/validate_token", c.APIBaseURL)
+	req, err := c.NewRequest("GET", url, nil)
+	if err != nil {
+		return false, err
+	}
+	resp, err := c.Do(req)
+	if err != nil {
+		return false, err
+	}
+	defer resp.Body.Close()
+
+	return resp.StatusCode == http.StatusOK, nil
+}
+
+// IsPingable calls the API /ping to determine whether the API can be reached.
+func (c *Client) IsPingable() error {
+	url := fmt.Sprintf("%s/ping", c.APIBaseURL)
+	req, err := c.NewRequest("GET", url, nil)
+	if err != nil {
+		return err
+	}
+	resp, err := c.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("API returned %s", resp.Status)
+	}
+	return nil
 }

@@ -8,8 +8,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"net/http"
+	"os"
 	"runtime"
 	"strings"
 	"time"
@@ -30,24 +30,35 @@ var (
 
 var (
 	osMap = map[string]string{
-		"darwin":  "mac",
+		"darwin":  "darwin",
+		"freebsd": "freebsd",
 		"linux":   "linux",
+		"openbsd": "openbsd",
 		"windows": "windows",
 	}
 
 	archMap = map[string]string{
-		"amd64": "64bit",
-		"386":   "32bit",
+		"386":   "i386",
+		"amd64": "x86_64",
 		"arm":   "arm",
+		"ppc64": "ppc64",
 	}
 )
 
 var (
+	// TimeoutInSeconds is the timeout the default HTTP client will use.
+	TimeoutInSeconds = 60
 	// HTTPClient is the client used to make HTTP calls in the cli package.
-	HTTPClient = &http.Client{Timeout: 10 * time.Second}
-	// LatestReleaseURL is the endpoint that provides information about the latest release.
-	LatestReleaseURL = "https://api.github.com/repos/exercism/cli/releases/latest"
+	HTTPClient = &http.Client{Timeout: time.Duration(TimeoutInSeconds) * time.Second}
+	// ReleaseURL is the endpoint that provides information about cli releases.
+	ReleaseURL = "https://api.github.com/repos/exercism/cli/releases"
 )
+
+// Updater is a simple upgradable file interface.
+type Updater interface {
+	IsUpToDate() (bool, error)
+	Upgrade() error
+}
 
 // CLI is information about the CLI itself.
 type CLI struct {
@@ -79,7 +90,7 @@ func (c *CLI) IsUpToDate() (bool, error) {
 		return false, fmt.Errorf("unable to parse current version (%s): %s", c.Version, err)
 	}
 
-	return rv.EQ(cv), nil
+	return cv.GTE(rv), nil
 }
 
 // Upgrade allows the user to upgrade to the latest version of the CLI.
@@ -127,7 +138,8 @@ func (c *CLI) Upgrade() error {
 }
 
 func (c *CLI) fetchLatestRelease() error {
-	resp, err := HTTPClient.Get(LatestReleaseURL)
+	latestReleaseURL := fmt.Sprintf("%s/%s", ReleaseURL, "latest")
+	resp, err := HTTPClient.Get(latestReleaseURL)
 	if err != nil {
 		return err
 	}
@@ -149,14 +161,18 @@ func (c *CLI) fetchLatestRelease() error {
 	return nil
 }
 
-func extractBinary(source *bytes.Reader, os string) (binary io.ReadCloser, err error) {
-	if os == "windows" {
+func extractBinary(source *bytes.Reader, platform string) (binary io.ReadCloser, err error) {
+	if platform == "windows" {
 		zr, err := zip.NewReader(source, int64(source.Len()))
 		if err != nil {
 			return nil, err
 		}
 
 		for _, f := range zr.File {
+			info := f.FileInfo()
+			if info.IsDir() || !strings.HasSuffix(f.Name, ".exe") {
+				continue
+			}
 			return f.Open()
 		}
 	} else {
@@ -175,7 +191,7 @@ func extractBinary(source *bytes.Reader, os string) (binary io.ReadCloser, err e
 			if err != nil {
 				return nil, err
 			}
-			tmpfile, err := ioutil.TempFile("", "temp-exercism")
+			tmpfile, err := os.CreateTemp("", "temp-exercism")
 			if err != nil {
 				return nil, err
 			}

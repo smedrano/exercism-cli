@@ -1,107 +1,54 @@
 # Cutting a CLI Release
 
-## Bootstrap Cross-Compilation for Go
+The Exercism CLI uses [GoReleaser](https://goreleaser.com) to automate the release process.
 
-**This only has to be done once.**
+## Requirements
 
-Change directory to the go source. Then run the bootstrap command for
-each operating system and architecture.
-
-```plain
-$ cd `which go`/../../src
-$ sudo GCO_ENABLED=0 GOOS=windows GOARCH=386 ./make.bash --no-clean
-$ sudo GCO_ENABLED=0 GOOS=darwin GOARCH=386 ./make.bash --no-clean
-$ sudo GCO_ENABLED=0 GOOS=linux GOARCH=386 ./make.bash --no-clean
-$ sudo GCO_ENABLED=0 GOOS=windows GOARCH=amd64 ./make.bash --no-clean
-$ sudo GCO_ENABLED=0 GOOS=darwin GOARCH=amd64 ./make.bash --no-clean
-$ sudo GCO_ENABLED=0 GOOS=linux GOARCH=amd64 ./make.bash --no-clean
-$ sudo GCO_ENABLED=0 GOOS=linux GOARCH=arm GOARM=6 ./make.bash --no-clean
-$ sudo GCO_ENABLED=0 GOOS=linux GOARCH=arm GOARM=5 ./make.bash --no-clean
-```
-
-## Update the Changelog
-
-Make sure all the recent changes are reflected in the "next release" section
-of the Changelog. Make this a separate commit from bumping the version.
+1. [Install GoReleaser](https://goreleaser.com/install/)
+1. [Setup GitHub token](https://goreleaser.com/scm/github/)
+1. Have a gpg key installed on your machine - it is [used for signing the artifacts](https://goreleaser.com/customization/sign/)
 
 ## Bump the version
 
-Edit the `Version` constant in `exercism/main.go`, and edit the Changelog.
-
-All the changes in the "next release" section should be moved to a new section
-that describes the version number, and gives it a date.
-
-The "next release" section should contain only "Your contribution here".
+1. Create a branch for the new version
+1. Bump the `Version` constant in `cmd/version.go`
+1. Update the `CHANGELOG.md` file to include a section for the new version and its changes.
+   Hint: you can view changes using the compare view: https://github.com/exercism/cli/compare/$PREVIOUS_RELEASE...main.
+1. Commit the updated files
+1. Create a PR
 
 _Note: It's useful to add the version to the commit message when you bump it: e.g. `Bump version to v2.3.4`._
 
-## Generate the Binaries
+## Cut a release
 
-```plain
-$ rm release/*
-$ CGO_ENABLED=0 bin/build-all
+Once the version bump PR has been merged, run the following command to cut a release:
+
+```shell
+GPG_FINGERPRINT="<THE_GPG_FINGERPRINT>" ./bin/release.sh
 ```
 
 ## Cut Release on GitHub
 
-Go to [the exercism/cli "new release" page](https://github.com/exercism/cli/releases/new).
-
-Describe the release, select a specific commit to target, name the version `v{VERSION}`, where
-VERSION matches the value of the `Version` constant.
-
-Upload all the binaries from `release/*`.
-
-Paste the release text and describe the new changes (`tail -n +57 RELEASE.md | head -n 16 | pbcopy`):
+Once the `./bin/release.sh` command finishes, the [release workflow](https://github.com/exercism/cli/actions/workflows/release.yml) will automatically run.
+This workflow will create a draft release at https://github.com/exercism/cli/releases/tag/vX.Y.Z.
+Once created, go that page to update the release description to:
 
 ```
-### Exercism Command-Line Interface (CLI)
+To install, follow the interactive installation instructions at https://exercism.org/cli-walkthrough
+---
 
-Exercism takes place in two places: the discussions happen on the website, and you work on exercises locally. The CLI bridges the gap, allowing you to fetch exercises and submit solutions to the site.
-
-This is a stand-alone binary, which means that you don't need to install any particular language or environment in order to use it.
-
-To install, download the archive that matches your operating system and architecture, unpack the archive, and put the binary somewhere on your path.
-
-You will need to configure the CLI with your [Exercism API Key](http://exercism.io/account/key) before submitting.
-
-For more detailed instructions, see the [CLI page on Exercism](http://exercism.io/cli).
-
-#### Recent Changes
-
-* ABC...
-* XYZ...
+[modify the generated release-notes to describe changes in this release]
 ```
 
-## Update Homebrew
+Lastly, test and then publish the draft.
 
-This is helpful for the (many) Mac OS X users.
+## Homebrew
 
-First, get a copy of the latest tarball of the source code:
+Homebrew will automatically bump the version, no manual action is required.
 
-```
-cd ~/tmp && wget https://github.com/exercism/cli/archive/vX.Y.Z.tar.gz
-```
-
-Get the SHA256 of the tarball:
-
-```
-shasum -a 256 vX.Y.Z.tar.gz
-```
-
-Update the homebrew formula:
-
-```
-cd $(brew --repository)
-git checkout master
-brew update
-brew bump-formula-pr --strict exercism --url=https://github.com/exercism/cli/archive/vX.Y.Z.tar.gz --sha256=$SHA
-```
-
-For more information see their [contribution guidelines](https://github.com/Homebrew/homebrew/blob/master/share/doc/homebrew/How-To-Open-a-Homebrew-Pull-Request-(and-get-it-merged).md#how-to-open-a-homebrew-pull-request-and-get-it-merged).
-
-## Update the Docs Site
+## Update the docs site
 
 If there are any significant changes, we should describe them on
-[cli.exercism.io](http://cli.exercism.io/).
+[exercism.org/cli](https://exercism.org/cli).
 
-The codebase lives at [exercism/cli-www](https://github.com/exercism/cli-www).
+The codebase lives at [exercism/website-copy](https://github.com/exercism/website-copy) in `pages/cli.md`.

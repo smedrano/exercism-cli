@@ -1,57 +1,81 @@
 package api
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
-	"github.com/exercism/cli/config"
 	"github.com/stretchr/testify/assert"
 )
 
-var (
-	mux    *http.ServeMux
-	server *httptest.Server
-	client *Client
-	conf   = &config.Config{APIKey: "apikey", API: "localhost", XAPI: "xlocalhost"}
-)
-
 func TestNewRequestSetsDefaultHeaders(t *testing.T) {
-	UserAgent = "Test"
-	client = NewClient(conf)
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `ok`)
+	}))
+	defer ts.Close()
 
-	req, err := client.NewRequest("GET", client.APIHost, nil)
-	assert.NoError(t, err)
+	UserAgent = "BogusAgent"
 
-	assert.Equal(t, UserAgent, req.Header.Get("User-Agent"))
-	assert.Equal(t, "application/json", req.Header.Get("Content-Type"))
+	testCases := []struct {
+		desc        string
+		client      *Client
+		auth        string
+		contentType string
+	}{
+		{
+			desc:        "User defaults",
+			client:      &Client{},
+			auth:        "",
+			contentType: "application/json",
+		},
+		{
+			desc: "Override defaults",
+			client: &Client{
+				Token:       "abc123",
+				APIBaseURL:  "http://example.com",
+				ContentType: "bogus",
+			},
+			auth:        "Bearer abc123",
+			contentType: "bogus",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.desc, func(t *testing.T) {
+			req, err := tc.client.NewRequest("GET", ts.URL, nil)
+			assert.NoError(t, err)
+			assert.Equal(t, "BogusAgent", req.Header.Get("User-Agent"))
+			assert.Equal(t, tc.contentType, req.Header.Get("Content-Type"))
+			assert.Equal(t, tc.auth, req.Header.Get("Authorization"))
+		})
+	}
 }
 
 func TestDo(t *testing.T) {
-	UserAgent = "Exercism Test v1"
-	mux = http.NewServeMux()
-	server = httptest.NewServer(mux)
-	defer server.Close()
-	url := server.URL
-	conf = &config.Config{APIKey: "apikey", API: url, XAPI: url}
-	client = NewClient(conf)
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "GET", r.Method)
 
-	type test struct {
-		T string
+		fmt.Fprint(w, `{"hello": "world"}`)
+	}))
+	defer ts.Close()
+
+	type payload struct {
+		Hello string `json:"hello"`
 	}
 
-	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		assert.Equal(t, "GET", r.Method)
-		assert.Equal(t, UserAgent, r.Header.Get("User-Agent"))
+	client := &Client{}
 
-		fmt.Fprint(w, `{"T":"world"}`)
-	})
-
-	req, _ := client.NewRequest("GET", client.APIHost+"/", nil)
-
-	var body test
-	_, err := client.Do(req, &body)
+	req, err := client.NewRequest("GET", ts.URL, nil)
 	assert.NoError(t, err)
-	assert.Equal(t, test{T: "world"}, body)
+
+	res, err := client.Do(req)
+	assert.NoError(t, err)
+
+	var body payload
+	err = json.NewDecoder(res.Body).Decode(&body)
+	assert.NoError(t, err)
+
+	assert.Equal(t, "world", body.Hello)
 }

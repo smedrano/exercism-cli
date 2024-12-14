@@ -6,6 +6,8 @@
 # Folders
 _obj
 _test
+vendor/
+dist/
 
 # Architecture specific extensions/prefixes
 *.[568vq]
@@ -24,6 +26,8 @@ _testmain.go
 out/
 release/
 go-exercism
+testercism
 
 # Intellij
 /.idea
+

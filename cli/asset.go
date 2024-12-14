@@ -3,7 +3,7 @@ package cli
 import (
 	"bytes"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"net/http"
 )
 
@@ -15,7 +15,7 @@ type Asset struct {
 }
 
 func (a *Asset) download() (*bytes.Reader, error) {
-	downloadURL := fmt.Sprintf("https://api.github.com/repos/exercism/cli/releases/assets/%d", a.ID)
+	downloadURL := fmt.Sprintf("%s/assets/%d", ReleaseURL, a.ID)
 	req, err := http.NewRequest("GET", downloadURL, nil)
 	if err != nil {
 		return nil, err
@@ -28,7 +28,7 @@ func (a *Asset) download() (*bytes.Reader, error) {
 	}
 	defer res.Body.Close()
 
-	bs, err := ioutil.ReadAll(res.Body)
+	bs, err := io.ReadAll(res.Body)
 	if err != nil {
 		return nil, err
 	}

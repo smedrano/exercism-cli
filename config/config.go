@@ -1,197 +1,134 @@
 package config
 
 import (
-	"bufio"
-	"bytes"
-	"encoding/json"
 	"fmt"
-	"io"
-	"log"
-	"net/url"
 	"os"
+	"path/filepath"
+	"regexp"
+	"runtime"
 	"strings"
 
-	"github.com/exercism/cli/paths"
+	"github.com/spf13/viper"
 )
 
-const (
-	// hostAPI is the endpoint to submit solutions to, and to get personalized data
-	hostAPI = "http://exercism.io"
-	// hostXAPI is the endpoint to fetch problems from
-	hostXAPI = "http://x.exercism.io"
+var (
+	defaultBaseURL = "https://api.exercism.org/v1"
+
+	// DefaultDirName is the default name used for config and workspace directories.
+	DefaultDirName string
 )
 
-// Config represents the settings for particular user.
-// This defines both the auth for talking to the API, as well as
-// where to put problems that get downloaded.
+// Config lets us inject configuration options into commands.
 type Config struct {
-	APIKey string `json:"apiKey"`
-	Dir    string `json:"dir"`
-	API    string `json:"api"`
-	XAPI   string `json:"xapi"`
-	File   string `json:"-"` // full path to config file
+	OS              string
+	Home            string
+	Dir             string
+	DefaultBaseURL  string
+	DefaultDirName  string
+	UserViperConfig *viper.Viper
+	Persister       Persister
 }
 
-// New returns a configuration struct with content from the exercism.json file
-func New(path string) (*Config, error) {
-	configPath := paths.Config(path)
-	_, err := os.Stat(configPath)
-	if err != nil && os.IsNotExist(err) {
-		if path == "" {
-			configPath = paths.DefaultConfig
+// NewConfig provides a configuration with default values.
+func NewConfig() Config {
+	home := userHome()
+	dir := Dir()
+
+	return Config{
+		OS:             runtime.GOOS,
+		Dir:            Dir(),
+		Home:           home,
+		DefaultBaseURL: defaultBaseURL,
+		DefaultDirName: DefaultDirName,
+		Persister:      FilePersister{Dir: dir},
+	}
+}
+
+// SetDefaultDirName configures the default directory name based on the name of the binary.
+func SetDefaultDirName(binaryName string) {
+	DefaultDirName = strings.Replace(filepath.Base(binaryName), ".exe", "", 1)
+}
+
+// Dir is the configured config home directory.
+// All the cli-related config files live in this directory.
+func Dir() string {
+	var dir string
+	if runtime.GOOS == "windows" {
+		dir = os.Getenv("APPDATA")
+		if dir != "" {
+			return filepath.Join(dir, DefaultDirName)
 		}
-	} else if err != nil {
-		return nil, err
-	}
-
-	c := &Config{
-		File: configPath,
-	}
-	err = c.load()
-	return c, err
-}
-
-// Update sets new values where given.
-func (c *Config) Update(key, host, dir, xapi string) error {
-	key = strings.TrimSpace(key)
-	if key != "" {
-		c.APIKey = key
-	}
-
-	host = strings.TrimSpace(host)
-	if host != "" {
-		c.API = host
-	}
-
-	if dir != "" {
-		c.Dir = paths.Exercises(dir)
-	}
-
-	xapi = strings.TrimSpace(xapi)
-	if xapi != "" {
-		c.XAPI = xapi
-	}
-
-	return nil
-}
-
-// Write saves the config as JSON.
-func (c *Config) Write() error {
-	// truncates existing file if it exists
-	f, err := os.Create(c.File)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-
-	b, err := json.MarshalIndent(c, "", "\t")
-	if err != nil {
-		return err
-	}
-
-	if _, err := f.Write(b); err != nil {
-		return err
-	}
-
-	return nil
-}
-
-func (c *Config) load() error {
-	if err := c.read(); err != nil {
-		return err
-	}
-
-	// in case people manually update the config file
-	// with weird formatting
-	c.APIKey = strings.TrimSpace(c.APIKey)
-	c.Dir = strings.TrimSpace(c.Dir)
-	c.API = strings.TrimSpace(c.API)
-	c.XAPI = strings.TrimSpace(c.XAPI)
-
-	return c.setDefaults()
-}
-
-func (c *Config) read() error {
-	if _, err := os.Stat(c.File); err != nil {
-		if os.IsNotExist(err) {
-			return nil
+	} else {
+		dir := os.Getenv("EXERCISM_CONFIG_HOME")
+		if dir != "" {
+			return dir
 		}
-		return err
-	}
-	f, err := os.Open(c.File)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-
-	if err := json.NewDecoder(f).Decode(&c); err != nil {
-		var extra string
-		if serr, ok := err.(*json.SyntaxError); ok {
-			if _, serr := f.Seek(0, os.SEEK_SET); serr != nil {
-				log.Fatalf("seek error: %v", serr)
-			}
-			line, str := findInvalidJSON(f, serr.Offset)
-			extra = fmt.Sprintf(":\ninvalid JSON syntax at line %d:\n%s",
-				line, str)
+		dir = os.Getenv("XDG_CONFIG_HOME")
+		if dir == "" {
+			dir = filepath.Join(os.Getenv("HOME"), ".config")
 		}
-		return fmt.Errorf("error parsing JSON in the config file %s%s\n%s", f.Name(), extra, err)
-	}
-
-	return nil
-}
-
-func findInvalidJSON(f io.Reader, pos int64) (int, string) {
-	var (
-		col     int
-		line    int
-		errLine []byte
-	)
-	buf := new(bytes.Buffer)
-	fb := bufio.NewReader(f)
-
-	for c := int64(0); c < pos; {
-		b, err := fb.ReadBytes('\n')
-		if err != nil {
-			log.Fatalf("read error: %v", err)
+		if dir != "" {
+			return filepath.Join(dir, DefaultDirName)
 		}
-		c += int64(len(b))
-		col = len(b) - int(c-pos)
-
-		line++
-		errLine = b
 	}
-
-	if len(errLine) != 0 {
-		buf.WriteString(fmt.Sprintf("%5d: %s <~", line, errLine[:col]))
-	}
-
-	return line, buf.String()
+	// If all else fails, use the current directory.
+	dir, _ = os.Getwd()
+	return dir
 }
 
-// IsAuthenticated returns true if the config contains an API key.
-// This does not check whether or not that key is valid.
-func (c *Config) IsAuthenticated() bool {
-	return c.APIKey != ""
+func userHome() string {
+	var dir string
+	if runtime.GOOS == "windows" {
+		dir = os.Getenv("USERPROFILE")
+		if dir != "" {
+			return dir
+		}
+		dir = filepath.Join(os.Getenv("HOMEDRIVE"), os.Getenv("HOMEPATH"))
+		if dir != "" {
+			return dir
+		}
+	} else {
+		dir = os.Getenv("HOME")
+		if dir != "" {
+			return dir
+		}
+	}
+	// If all else fails, use the current directory.
+	dir, _ = os.Getwd()
+	return dir
 }
 
-func (c *Config) setDefaults() error {
-	if c.API == "" {
-		c.API = hostAPI
+// DefaultWorkspaceDir provides a sensible default for the Exercism workspace.
+// The default is different depending on the platform, in order to best match
+// the conventions for that platform.
+// It places the directory in the user's home path.
+func DefaultWorkspaceDir(cfg Config) string {
+	dir := cfg.DefaultDirName
+	if cfg.OS != "linux" {
+		dir = strings.Title(dir)
 	}
+	return filepath.Join(cfg.Home, dir)
+}
 
-	if c.XAPI == "" {
-		c.XAPI = hostXAPI
+// Save persists a viper config of the base name.
+func (c Config) Save(basename string) error {
+	return c.Persister.Save(c.UserViperConfig, basename)
+}
+
+// InferSiteURL guesses what the website URL is.
+// The basis for the guess is which API we're submitting to.
+func InferSiteURL(apiURL string) string {
+	if apiURL == "" {
+		apiURL = defaultBaseURL
 	}
-
-	if _, err := url.Parse(c.API); err != nil {
-		return fmt.Errorf("invalid API URL %s", err)
+	if apiURL == "https://api.exercism.org/v1" {
+		return "https://exercism.org"
 	}
+	re := regexp.MustCompile("^(https?://[^/]*).*")
+	return re.ReplaceAllString(apiURL, "$1")
+}
 
-	if _, err := url.Parse(c.XAPI); err != nil {
-		return fmt.Errorf("invalid xAPI URL %s", err)
-	}
-
-	c.Dir = paths.Exercises(c.Dir)
-
-	return nil
+// SettingsURL provides a link to where the user can find their API token.
+func SettingsURL(apiURL string) string {
+	return fmt.Sprintf("%s%s", InferSiteURL(apiURL), "/my/settings")
 }
